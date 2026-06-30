@@ -151,6 +151,7 @@ table.rt{width:100%;border-collapse:collapse;font-size:12px;min-width:920px}
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <div class="seg" id="seg-unit"><button data-v="amount" class="on" onclick="setUnit('amount')">금액</button><button data-v="qty" onclick="setUnit('qty')">수량</button></div>
         <div class="seg" id="seg-scope"><button data-v="전체" class="on" onclick="setScope('전체')">전체</button><button data-v="국내" onclick="setScope('국내')">국내</button><button data-v="해외" onclick="setScope('해외')">해외</button></div>
+        <div class="seg" id="seg-pend"><button data-v="on" class="on" onclick="setPend(true)">회계+미반영</button><button data-v="off" onclick="setPend(false)">회계만</button></div>
       </div></div>
     <div class="wrap" id="view"></div>
   </main>
@@ -165,7 +166,7 @@ table.rt{width:100%;border-collapse:collapse;font-size:12px;min-width:920px}
 const SB_URL='https://mhfacbsittfdkknwybhc.supabase.co', SB_KEY='sb_publishable_aPMOOWAlyJlMcP1ZM_gpPA_jlrcvCRd';
 const _sb=supabase.createClient(SB_URL,SB_KEY);
 const CENTRAL='https://wt-management.github.io/wontech/';
-let SP=null, ME='', unit='amount', scope='전체';
+let SP=null, SPbase=null, PENDAGG=null, showPend=true, ME='', unit='amount', scope='전체';
 const QL=['25 1Q','25 2Q','25 3Q','25 4Q','26 1Q','26 2Q'];
 const CATCOL={'RF/HIFU':'#3f5e7a','Laser':'#5e8a73','Surgical':'#a8895e','소모품':'#8a7a9e'};
 // 보고표 컬럼 정의 (엑셀 형식: 2025 1~4Q+합계, 2026 1~2Q+합계)
@@ -188,12 +189,84 @@ async function goSite(url){try{const {data:{session:s}}=await _sb.auth.getSessio
 document.addEventListener('click',e=>{const w=document.querySelector('.switch-wrap');if(w&&!w.contains(e.target))document.getElementById('swdd').classList.remove('open');});
 async function enter(user){
   ME=user.email||''; document.getElementById('uname').textContent=ME; document.getElementById('uname-nm').textContent=(ME.split('@')[0]||'사용자'); document.getElementById('uavatar').textContent=(ME[0]||'P').toUpperCase();
-  const {data,error}=await _sb.from('cons_cache').select('data').eq('key','sales_portfolio').single();
-  if(error||!data){ document.getElementById('load').innerHTML='데이터를 불러오지 못했습니다. ('+(error&&error.message||'없음')+')'; return; }
-  SP=data.data; document.getElementById('asof').textContent='제품 포트폴리오·믹스 분석 · 기준 '+(SP.asOf||'')+' · 단위 '+(SP.unit||'백만원')+'(수량=대)';
+  const [spRes, pendRes]=await Promise.all([
+    _sb.from('cons_cache').select('data').eq('key','sales_portfolio').single(),
+    _sb.from('cons_cache').select('data').eq('key','ilbo_pending').maybeSingle()
+  ]);
+  if(spRes.error||!spRes.data){ document.getElementById('load').innerHTML='데이터를 불러오지 못했습니다. ('+(spRes.error&&spRes.error.message||'없음')+')'; return; }
+  SPbase=spRes.data.data;
+  buildPendAgg((pendRes.data&&pendRes.data.data&&pendRes.data.data.rows)||[]);
+  SP=applyPending(SPbase);
+  document.getElementById('asof').textContent='제품 포트폴리오·믹스 분석 · 기준 '+(SPbase.asOf||'')+' · 단위 '+(SPbase.unit||'백만원')+'(수량=대)';
   document.getElementById('load').style.display='none'; document.getElementById('app').style.display='block';
   render();
 }
+
+// ── 미반영(ilbo_pending) → 포트폴리오 품목 매핑·가산 (total.html과 동일 소스) ──
+function pmapItem(p){
+  p=String(p||'').trim();
+  if(!p) return null;
+  if(/oligio.*(face|eye).*tip|oligio.*tip|^tip/i.test(p)) return 'Oligio Tip';
+  if(/cartridge|카트리지/i.test(p)) return 'Cartridge';
+  if(/oligio\s*x|the oligio/i.test(p)) return 'Oligio X';
+  if(/oligio\s*kiss/i.test(p)) return 'Oligio Kiss';
+  if(/oligio/i.test(p)) return 'Oligio';
+  if(/tightan|ultra\s*skin/i.test(p)) return 'Tightan';
+  if(/lavieen|nouvaderm/i.test(p)) return 'Lavieen';
+  if(/pastelle/i.test(p)) return 'Pastelle';
+  if(/v[\s-]*laser/i.test(p)) return 'V-Laser';
+  if(/majesty/i.test(p)) return 'Picocare Majesty';
+  if(/pico\s*care|picocare|450/i.test(p)) return 'Picocare 450';
+  if(/pico\s*andy/i.test(p)) return 'Pico Andy';
+  if(/pico\s*alex/i.test(p)) return 'PicoAlex';
+  if(/sandro/i.test(p)) return 'SANDRO Dual';
+  if(/avvio/i.test(p)) return 'AVVIO';
+  if(/asr|cosjet/i.test(p)) return 'Cosjet ASR';
+  if(/holinwon/i.test(p)) return 'HolinWON';
+  if(/veincare/i.test(p)) return 'Veincare';
+  if(/beladon/i.test(p)) return 'Beladona';
+  return null;
+}
+const CONSUM_ITEMS=['Oligio Tip','Cartridge'];
+function buildPendAgg(rows){
+  // {amount:{scope:{item:[q1..q4]}}, qty:{...}} — 2026 expectedDate 기준 분기
+  const A={'전체':{},'국내':{},'해외':{}}, Q={'전체':{},'국내':{},'해외':{}};
+  let cnt=0;
+  (rows||[]).forEach(r=>{
+    const st=String(r.status||''); if(st==='취소'||st==='반영됨'||st==='반영') return;
+    const item=pmapItem(r.product); if(!item) return;
+    const ed=String(r.expectedDate||''); const m=ed.match(/^2026-(\d{2})/); if(!m) return;
+    const qi=Math.floor((parseInt(m[1],10)-1)/3); if(qi<0||qi>3) return;
+    const scp=(r.region==='해외')?'해외':'국내';
+    const amt=(Number(r.amount)||0)/1e6, qty=Number(r.qty)||0;
+    const addA=(s)=>{ A[s][item]=A[s][item]||[0,0,0,0]; A[s][item][qi]+=amt; };
+    addA('전체'); addA(scp);
+    if(CONSUM_ITEMS.indexOf(item)<0){ const addQ=(s)=>{ Q[s][item]=Q[s][item]||[0,0,0,0]; Q[s][item][qi]+=qty; }; addQ('전체'); addQ(scp); }
+    cnt++;
+  });
+  PENDAGG=cnt>0?{amount:A,qty:Q}:null;
+}
+const RFSET=['Oligio','Oligio X','Oligio Kiss'], HIFUSET=['Tightan'], AGG_ITEMS=['총합계','소계','RF 소계','HIFU 소계'];
+function applyPending(base){
+  if(!showPend||!PENDAGG) return base;
+  const SP2=JSON.parse(JSON.stringify(base));
+  ['amount','qty'].forEach(u=>{['전체','국내','해외'].forEach(s=>{
+    const arr=SP2[u]&&SP2[u][s]; if(!arr) return;
+    const pend=(PENDAGG[u]&&PENDAGG[u][s])||{};
+    arr.forEach(r=>{ if(AGG_ITEMS.indexOf(r.item)>=0) return; const pv=pend[r.item]; if(!pv) return;
+      r.q26=r.q26||[0,0,0,0]; for(let i=0;i<4;i++) r.q26[i]=(r.q26[i]||0)+(pv[i]||0); r.t26=r.q26[0]+r.q26[1]+r.q26[2]+r.q26[3]; });
+    const prod=arr.filter(r=>AGG_ITEMS.indexOf(r.item)<0);
+    const sum=rows=>{const q=[0,0,0,0];rows.forEach(r=>{for(let i=0;i<4;i++)q[i]+=(r.q26&&r.q26[i])||0;});return q;};
+    arr.forEach(r=>{ let src=null;
+      if(r.item==='총합계') src=prod;
+      else if(r.item==='소계') src=prod.filter(p=>p.cat===r.cat);
+      else if(r.item==='RF 소계') src=prod.filter(p=>RFSET.indexOf(p.item)>=0);
+      else if(r.item==='HIFU 소계') src=prod.filter(p=>HIFUSET.indexOf(p.item)>=0);
+      if(src){ r.q26=sum(src); r.t26=r.q26[0]+r.q26[1]+r.q26[2]+r.q26[3]; } });
+  });});
+  return SP2;
+}
+function setPend(on){ showPend=on; document.querySelectorAll('#seg-pend button').forEach(b=>b.classList.toggle('on',(b.dataset.v==='on')===on)); SP=applyPending(SPbase); render(); }
 
 // ── 데이터 헬퍼 ──
 function scopeRows(u,s){ return (SP&&SP[u]&&SP[u][s])||[]; }
