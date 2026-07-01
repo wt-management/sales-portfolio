@@ -188,7 +188,13 @@ async function changePw(){const np=prompt('새 비밀번호 (6자 이상)');if(n
 async function goSite(url){try{const {data:{session:s}}=await _sb.auth.getSession();if(s&&url.indexOf('#')<0)url+='#at='+encodeURIComponent(s.access_token)+'&rt='+encodeURIComponent(s.refresh_token);}catch(e){}location.href=url;}
 document.addEventListener('click',e=>{const w=document.querySelector('.switch-wrap');if(w&&!w.contains(e.target))document.getElementById('swdd').classList.remove('open');});
 async function enter(user){
-  ME=user.email||''; document.getElementById('uname').textContent=ME; document.getElementById('uname-nm').textContent=(ME.split('@')[0]||'사용자'); document.getElementById('uavatar').textContent=(ME[0]||'P').toUpperCase();
+  ME=user.email||'';
+  // ── 접근 권한 검사: portfolio 권한(또는 관리자/마스터)만 진입 ──
+  const {data:_pf}=await _sb.from('crm_profiles').select('access,role').eq('id',user.id).maybeSingle();
+  if(!(String((_pf&&_pf.access)||'').includes('portfolio')||(_pf&&_pf.role==='admin')||user.email==='pmw0406@gmail.com')){
+    await _sb.auth.signOut(); alert('Sales Portfolio 접근 권한이 없습니다.'); location.href=CENTRAL; return;
+  }
+  document.getElementById('uname').textContent=ME; document.getElementById('uname-nm').textContent=(ME.split('@')[0]||'사용자'); document.getElementById('uavatar').textContent=(ME[0]||'P').toUpperCase();
   const [spRes, pendRes]=await Promise.all([
     _sb.from('cons_cache').select('data').eq('key','sales_portfolio').single(),
     _sb.from('cons_cache').select('data').eq('key','ilbo_pending').maybeSingle()
