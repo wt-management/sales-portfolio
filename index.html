@@ -201,6 +201,8 @@ if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded'
 const SB_URL='https://mhfacbsittfdkknwybhc.supabase.co', SB_KEY='sb_publishable_aPMOOWAlyJlMcP1ZM_gpPA_jlrcvCRd';
 const _sb=supabase.createClient(SB_URL,SB_KEY);
 const CENTRAL='https://wt-management.github.io/wontech/';
+/* 중앙 로그인으로 이동(세션 없음). ret에는 해시를 절대 포함하지 않음 — #at/rt 토큰 유출·오염 방지 */
+function _goCentralWithRet(){location.replace(CENTRAL+'#ret='+encodeURIComponent(location.origin+location.pathname+location.search));}
 /* WT_NAV: SSO 토큰 해시(#at=..&rt=..) 즉시 제거 — 이 사이트는 토큰을 파싱하지 않음 (유효 딥링크 해시는 보존) */
 if(/^#(at|rt)=/.test(location.hash)) history.replaceState(null,'',location.pathname);
 let SP=null, SPbase=null, PENDAGG=null, showPend=true, ME='', unit='amount', scope='전체';
@@ -217,7 +219,7 @@ async function boot(){
   const {data}=await _sb.auth.getSession();
   if(data&&data.session){ await enter(data.session.user); }
   else if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){ document.getElementById('load').textContent='로컬 개발 모드 (세션 없음)'; }
-  else { location.replace(CENTRAL); }
+  else { _goCentralWithRet(); }  // 세션 없음 → 중앙 로그인(복귀용 ret 동봉)
 }
 async function doLogin(){const e=(document.getElementById('login-id').value||'').trim(),p=(document.getElementById('login-pw').value||'').trim();const err=document.getElementById('login-err');err.style.display='none';const {data,error}=await _sb.auth.signInWithPassword({email:e,password:p});if(error){err.style.display='block';return;}await enter(data.user);}
 /* ── 자동 로그아웃: 30분 무동작 시 자동 로그아웃 ── */
@@ -251,7 +253,7 @@ async function enter(user){
   // ── 접근 권한 검사: portfolio 권한(또는 관리자/마스터)만 진입 ──
   const {data:_pf}=await _sb.from('crm_profiles').select('access,role').eq('id',user.id).maybeSingle();
   if(!(String((_pf&&_pf.access)||'').includes('portfolio')||(_pf&&_pf.role==='admin')||user.email==='pmw0406@gmail.com')){
-    await _sb.auth.signOut(); alert('Sales Portfolio 접근 권한이 없습니다.'); location.replace(CENTRAL); return;
+    alert('Sales Portfolio 접근 권한이 없습니다.'); location.replace(CENTRAL); return;  /* 권한 없음: ret 없이(무한 루프 방지) · signOut 금지(전 사이트 공유 세션 파괴) */
   }
   document.getElementById('uname').textContent=ME; document.getElementById('uname-nm').textContent=(ME.split('@')[0]||'사용자'); document.getElementById('uavatar').textContent=(ME[0]||'P').toUpperCase();
   const [spRes, pendRes]=await Promise.all([
