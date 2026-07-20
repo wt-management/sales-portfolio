@@ -369,7 +369,7 @@ function buildPendAgg(rows){
     const st=String(r.status||''); if(st==='취소'||st==='반영됨'||st==='반영') return;
     const item=pmapItem(r.product); if(!item) return;
     const ed=String(r.expectedDate||''); const m=ed.match(/^2026-(\d{2})/); if(!m) return;
-    const qi=Math.floor((parseInt(m[1],10)-1)/3); if(qi<0||qi>3) return;
+    const qi=Math.floor((parseInt(m[1],10)-1)/3); if(qi<0||qi>1) return;  // 1H(1Q/2Q)만 반영 — 3Q/4Q pending은 반기 매출에서 제외
     const scp=(r.region==='해외')?'해외':'국내';
     const amt=(Number(r.amount)||0)/1e6, qty=Number(r.qty)||0;
     const addA=(s)=>{ A[s][item]=A[s][item]||[0,0,0,0]; A[s][item][qi]+=amt; };
@@ -387,7 +387,7 @@ function applyPending(base){
     const arr=SP2[u]&&SP2[u][s]; if(!arr) return;
     const pend=(PENDAGG[u]&&PENDAGG[u][s])||{};
     arr.forEach(r=>{ if(AGG_ITEMS.indexOf(r.item)>=0) return; const pv=pend[r.item]; if(!pv) return;
-      r.q26=r.q26||[0,0,0,0]; for(let i=0;i<4;i++) r.q26[i]=(r.q26[i]||0)+(pv[i]||0); r.t26=r.q26[0]+r.q26[1]+r.q26[2]+r.q26[3]; });
+      r.q26=r.q26||[0,0,0,0]; for(let i=0;i<2;i++) r.q26[i]=(r.q26[i]||0)+(pv[i]||0); r.t26=r.q26[0]+r.q26[1]; });
     const prod=arr.filter(r=>AGG_ITEMS.indexOf(r.item)<0);
     const sum=rows=>{const q=[0,0,0,0];rows.forEach(r=>{for(let i=0;i<4;i++)q[i]+=(r.q26&&r.q26[i])||0;});return q;};
     arr.forEach(r=>{ let src=null;
@@ -395,7 +395,7 @@ function applyPending(base){
       else if(r.item==='소계') src=prod.filter(p=>p.cat===r.cat);
       else if(r.item==='RF 소계') src=prod.filter(p=>RFSET.indexOf(p.item)>=0);
       else if(r.item==='HIFU 소계') src=prod.filter(p=>HIFUSET.indexOf(p.item)>=0);
-      if(src){ r.q26=sum(src); r.t26=r.q26[0]+r.q26[1]+r.q26[2]+r.q26[3]; } });
+      if(src){ r.q26=sum(src); r.t26=r.q26[0]+r.q26[1]; } });
   });});
   return SP2;
 }
