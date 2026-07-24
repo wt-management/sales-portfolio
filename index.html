@@ -421,6 +421,8 @@ function curv(r){ return r.t26||0; }                              // 1H26
 function fmt(v){ return Math.round(v).toLocaleString(); }         // 보고표(백만원/대)
 function eok(v){ return (v/100).toFixed(1)+'억'; }                // 억 표기(금액 전용)
 function pct(n,d){ return d>0?(n/d*100):0; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function jsAttr(s){ return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function yoyChip(n,d){ if(!d) return '<span class="mut">–</span>'; const g=(n/d-1)*100; return '<span class="'+(g>=0?'up':'dn')+'">'+(g>=0?'+':'')+g.toFixed(0)+'%</span>'; }
 function setUnit(u){unit=u;if(unit==='qty'&&scope!=='전체'){}document.querySelectorAll('#seg-unit button').forEach(b=>b.classList.toggle('on',b.dataset.v===u));pfSaveState();render();}
 function setScope(s){scope=s;document.querySelectorAll('#seg-scope button').forEach(b=>b.classList.toggle('on',b.dataset.v===s));pfSaveState();render();}
@@ -486,7 +488,7 @@ function secTable(){
     const ty=rowType(r);
     const cat=r.cat, col=CATCOL[cat]||'#94a3b8';
     const lbl = ty==='grand'?'총합계' : ty==='cat'? ('<span class="catdot" style="background:'+col+'"></span>'+cat+' 소계') : r.item;
-    const click = ty==='grand'?'' : ' onclick="openDetail(\''+cat.replace(/'/g,"\\'")+'\',\''+r.item.replace(/'/g,"\\'")+'\')"';
+    const click = ty==='grand'?'' : ' onclick="openDetail(\''+jsAttr(cat)+'\',\''+jsAttr(r.item)+'\')"';
     let tds='';
     COLS.forEach(c=>{ const v=cv(r,c), p=pct(v,cv(g,c)); tds+='<td><div class="cv">'+fmt(v)+'</div><div class="cp">'+p.toFixed(1)+'%</div></td>'; });
     body+='<tr class="'+ty+'"'+click+'><td class="lbl">'+lbl+'</td>'+tds+'</tr>';
@@ -536,7 +538,7 @@ function secGrowth(){
 // ── 주요 내역 ──
 function secNote(){
   const notes=(SP.notes||[]);
-  const h=notes.map(n=>{ if(n[0]==='■') return '<div class="note h">'+n.replace(/^■\s*/,'')+'</div>'; if(/^\d\./.test(n)) return '<div class="note h" style="color:#3f5e7a">'+n+'</div>'; if(n[0]==='·') return '<div class="note b">'+n.replace(/^·\s*/,'')+'</div>'; return '<div class="note">'+n+'</div>'; }).join('');
+  const h=notes.map(n=>{ if(n[0]==='■') return '<div class="note h">'+esc(n.replace(/^■\s*/,''))+'</div>'; if(/^\d\./.test(n)) return '<div class="note h" style="color:#3f5e7a">'+esc(n)+'</div>'; if(n[0]==='·') return '<div class="note b">'+esc(n.replace(/^·\s*/,''))+'</div>'; return '<div class="note">'+esc(n)+'</div>'; }).join('');
   return '<div id="s-note"></div><div class="card"><div class="sec">📝 주요 내역 (1H26 분석)</div>'+(h||'<div class="mut">내역 없음</div>')+'</div>';
 }
 
@@ -569,7 +571,7 @@ function openDetail(cat,item){
     '<div style="overflow-x:auto"><table class="dt"><thead><tr><th class="l">구분</th>'+COLS.map(c=>'<th>'+(c.k==='t25'?'25합':c.k==='t26'?'26합':(c.grp.slice(2,4)+c.lab))+'</th>').join('')+'</tr></thead><tbody>'+
       trow('전체',rAll)+trow('국내',rDom)+trow('해외',rInt)+'</tbody></table>'+
       '<div class="hint" style="margin-top:8px">단위 '+uLab+' · 상단 토글(금액/수량)에 연동</div></div>';
-  document.getElementById('m-title').innerHTML=name+' <span class="mut" style="font-size:12px;font-weight:500">'+cat+'</span>';
+  document.getElementById('m-title').innerHTML=esc(name)+' <span class="mut" style="font-size:12px;font-weight:500">'+esc(cat)+'</span>';
   document.getElementById('m-body').innerHTML=body;
   document.getElementById('modal').classList.add('open');
   // 미니 추이 차트 (전체/국내/해외)
