@@ -261,12 +261,18 @@ let QL=[], COLS=[];
 function _dataYear(){ try{ var m=String((SPbase&&SPbase.asOf)||'').match(/^(20\d\d)/); if(m) return parseInt(m[1],10); }catch(e){} return 2026; }
 function _rebuildCols(){
   const py=_dataYear()-1, cy=_dataYear();
+  // 진행 중인 마지막 분기(MOE가 그 분기를 다 못 채웠으면)는 분기 한 칸이 아니라 '지난 월들'로 쪼개서 보여줌
+  const lastQClosed = MOE>=NQ*3;
+  const closedQN = lastQClosed?NQ:(NQ-1);   // 분기 칸으로 표시할 개수(닫힌 분기)
   QL=[String(py).slice(2)+' 1Q',String(py).slice(2)+' 2Q',String(py).slice(2)+' 3Q',String(py).slice(2)+' 4Q'];
-  for(let i=0;i<NQ;i++) QL.push(String(cy).slice(2)+' '+(i+1)+'Q');
   COLS=[
     {grp:py+'년',lab:'1Q',k:'q25',i:0},{grp:py+'년',lab:'2Q',k:'q25',i:1},{grp:py+'년',lab:'3Q',k:'q25',i:2},{grp:py+'년',lab:'4Q',k:'q25',i:3},{grp:py+'년',lab:'합계',k:'t25'},
   ];
-  for(let i=0;i<NQ;i++) COLS.push({grp:cy+'년',lab:(i+1)+'Q',k:'q26',i:i});
+  for(let i=0;i<closedQN;i++){ QL.push(String(cy).slice(2)+' '+(i+1)+'Q'); COLS.push({grp:cy+'년',lab:(i+1)+'Q',k:'q26',i:i}); }
+  if(!lastQClosed){
+    // 진행 중 분기(NQ번째)의 경과월만 개별 월 칸으로 — 예: 8월까지면 3Q 대신 7월·8월
+    for(let mo=closedQN*3+1; mo<=MOE; mo++){ QL.push(mo+'월'); COLS.push({grp:cy+'년',lab:mo+'월',k:'m26',i:mo-1}); }
+  }
   COLS.push({grp:cy+'년',lab:'합계',k:'t26'});
 }
 _rebuildCols();
@@ -432,41 +438,46 @@ function pmapItem(p){
 }
 const CONSUM_ITEMS=['Oligio Tip','Cartridge'];
 function buildPendAgg(rows){
-  // {amount:{scope:{item:[q1..q4]}}, qty:{...}} — 당해년도(_dataYear) expectedDate 기준 분기
+  // {amount:{scope:{item:[q1..q4]}}, qty:{...}, monthAmount:{...:{item:[m1..m12]}}} — 당해년도(_dataYear) expectedDate 기준
   const A={'전체':{},'국내':{},'해외':{}}, Q={'전체':{},'국내':{},'해외':{}};
+  const MA={'전체':{},'국내':{},'해외':{}};
   const cy=_dataYear(), yre=new RegExp('^'+cy+'-(\\d{2})');
   let cnt=0;
   (rows||[]).forEach(r=>{
     const st=String(r.status||''); if(st==='취소'||st==='반영됨'||st==='반영') return;
     const item=pmapItem(r.product); if(!item) return;
     const ed=String(r.expectedDate||''); const m=ed.match(yre); if(!m) return;
-    const qi=Math.floor((parseInt(m[1],10)-1)/3); if(qi<0||qi>3) return;  // 표시 분기(NQ)는 데이터 따라 자동 확장되므로 전 분기 반영
+    const mo=parseInt(m[1],10); const qi=Math.floor((mo-1)/3); if(qi<0||qi>3) return;  // 표시 분기(NQ)는 데이터 따라 자동 확장되므로 전 분기 반영
     const scp=(r.region==='해외')?'해외':'국내';
     const amt=(Number(r.amount)||0)/1e6, qty=Number(r.qty)||0;
     const addA=(s)=>{ A[s][item]=A[s][item]||[0,0,0,0]; A[s][item][qi]+=amt; };
-    addA('전체'); addA(scp);
+    const addM=(s)=>{ MA[s][item]=MA[s][item]||[0,0,0,0,0,0,0,0,0,0,0,0]; MA[s][item][mo-1]+=amt; };
+    addA('전체'); addA(scp); addM('전체'); addM(scp);
     if(CONSUM_ITEMS.indexOf(item)<0){ const addQ=(s)=>{ Q[s][item]=Q[s][item]||[0,0,0,0]; Q[s][item][qi]+=qty; }; addQ('전체'); addQ(scp); }
     cnt++;
   });
-  PENDAGG=cnt>0?{amount:A,qty:Q}:null;
+  PENDAGG=cnt>0?{amount:A,qty:Q,monthAmount:MA}:null;
 }
-const RFSET=['Oligio','Oligio X','Oligio Kiss'], HIFUSET=['Tightan'], AGG_ITEMS=['총합계','소계','RF 소계','HIFU 소계'];
+const RFSET=['Oligio','Oligio X','Oligio Kiss','Oligio ES','Oligio XM'], HIFUSET=['Tightan'], AGG_ITEMS=['총합계','소계','RF 소계','HIFU 소계'];
 function applyPending(base){
   if(!showPend||!PENDAGG) return base;
   const SP2=JSON.parse(JSON.stringify(base));
   ['amount','qty'].forEach(u=>{['전체','국내','해외'].forEach(s=>{
     const arr=SP2[u]&&SP2[u][s]; if(!arr) return;
     const pend=(PENDAGG[u]&&PENDAGG[u][s])||{};
-    arr.forEach(r=>{ if(AGG_ITEMS.indexOf(r.item)>=0) return; const pv=pend[r.item]; if(!pv) return;
-      r.q26=r.q26||[0,0,0,0]; for(let i=0;i<4;i++) r.q26[i]=(r.q26[i]||0)+(pv[i]||0); r.t26=_sumNQ(r.q26); });
+    const pendM=(u==='amount')?((PENDAGG.monthAmount&&PENDAGG.monthAmount[s])||{}):{};
+    arr.forEach(r=>{ if(AGG_ITEMS.indexOf(r.item)>=0) return;
+      const pv=pend[r.item]; if(pv){ r.q26=r.q26||[0,0,0,0]; for(let i=0;i<4;i++) r.q26[i]=(r.q26[i]||0)+(pv[i]||0); r.t26=_sumNQ(r.q26); }
+      const pm=pendM[r.item]; if(u==='amount'&&pm){ r.m26=r.m26||[0,0,0,0,0,0,0,0,0,0,0,0]; for(let i=0;i<12;i++) r.m26[i]=(r.m26[i]||0)+(pm[i]||0); } });
     const prod=arr.filter(r=>AGG_ITEMS.indexOf(r.item)<0);
     const sum=rows=>{const q=[0,0,0,0];rows.forEach(r=>{for(let i=0;i<4;i++)q[i]+=(r.q26&&r.q26[i])||0;});return q;};
+    const sumM=rows=>{const m=[0,0,0,0,0,0,0,0,0,0,0,0];rows.forEach(r=>{for(let i=0;i<12;i++)m[i]+=(r.m26&&r.m26[i])||0;});return m;};
     arr.forEach(r=>{ let src=null;
       if(r.item==='총합계') src=prod;
       else if(r.item==='소계') src=prod.filter(p=>p.cat===r.cat);
       else if(r.item==='RF 소계') src=prod.filter(p=>RFSET.indexOf(p.item)>=0);
       else if(r.item==='HIFU 소계') src=prod.filter(p=>HIFUSET.indexOf(p.item)>=0);
-      if(src){ r.q26=sum(src); r.t26=_sumNQ(r.q26); } });
+      if(src){ r.q26=sum(src); r.t26=_sumNQ(r.q26); if(u==='amount') r.m26=sumM(src); } });
   });});
   return SP2;
 }
@@ -560,7 +571,7 @@ function secTable(){
   return '<div id="s-table"></div><div class="card" style="padding:16px 16px 8px">'+
     '<div class="sec" style="margin:2px 4px 12px">📋 분기별 Portfolio ('+(unit==='amount'?'금액':'수량')+') <span class="hint">단위 '+unitLab+' · 숫자/행 클릭 → 상세현황 · %는 분기 총합계 대비</span></div>'+
     '<div class="tbl-scroll"><table class="rt"><thead>'+
-      '<tr><th class="lbl" rowspan="2">상세품목</th><th class="grp" colspan="5">'+(_dataYear()-1)+'년</th><th class="grp" colspan="'+(NQ+1)+'">'+_dataYear()+'년</th></tr>'+
+      '<tr><th class="lbl" rowspan="2">상세품목</th><th class="grp" colspan="5">'+(_dataYear()-1)+'년</th><th class="grp" colspan="'+(COLS.length-5)+'">'+_dataYear()+'년</th></tr>'+
       '<tr>'+COLS.map(c=>'<th>'+c.lab+'</th>').join('')+'</tr>'+
     '</thead><tbody>'+body+'</tbody></table></div></div>';
 }
@@ -638,7 +649,7 @@ function openDetail(cat,item){
       '<div class="mmini"><div class="t">국내 추이</div><div style="height:120px"><canvas id="mch-dom"></canvas></div></div>'+
       '<div class="mmini"><div class="t">해외 추이</div><div style="height:120px"><canvas id="mch-int"></canvas></div></div>'+
     '</div>'+
-    '<div style="overflow-x:auto"><table class="dt"><thead><tr><th class="l">구분</th>'+COLS.map(c=>'<th>'+(c.k==='t25'?_py2+'합':c.k==='t26'?_cy2+'합':(c.grp.slice(2,4)+c.lab))+'</th>').join('')+'</tr></thead><tbody>'+
+    '<div style="overflow-x:auto"><table class="dt"><thead><tr><th class="l">구분</th>'+COLS.map(c=>'<th>'+(c.k==='t25'?_py2+'합':c.k==='t26'?_cy2+'합':(c.k==='m26'?c.lab:(c.grp.slice(2,4)+c.lab)))+'</th>').join('')+'</tr></thead><tbody>'+
       trow('전체',rAll)+trow('국내',rDom)+trow('해외',rInt)+'</tbody></table>'+
       '<div class="hint" style="margin-top:8px">단위 '+uLab+' · 상단 토글(금액/수량)에 연동 · 그래프는 각자 자체 축(흐름 비교용, 서로 스케일 다름)</div></div>';
   document.getElementById('m-title').innerHTML=esc(name)+' <span class="mut" style="font-size:12px;font-weight:500">'+esc(cat)+'</span>';
