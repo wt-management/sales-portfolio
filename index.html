@@ -337,8 +337,9 @@ async function enter(user){
       ['amount','qty'].forEach(u=>['전체','국내','해외'].forEach(s=>((SPbase[u]||{})[s]||[]).forEach(r=>scan(r.q26))));
       if(PENDAGG) ['amount','qty'].forEach(u=>['전체','국내','해외'].forEach(s=>{ const o=(PENDAGG[u]||{})[s]||{}; Object.keys(o).forEach(k=>scan(o[k])); }));
     }catch(e){}
-    NQ=Math.min(4,Math.max(2,n)); _rebuildCols();
+    NQ=Math.min(4,Math.max(2,n));
     MOE=NQ*3; try{ const mm=String((SPbase&&SPbase.asOf)||'').match(/^20\d\d[.\-](\d{2})/); if(mm) MOE=Math.min(NQ*3,Math.max(1,parseInt(mm[1],10))); }catch(e){}
+    _rebuildCols();   // MOE 확정 후에 호출해야 진행 중 분기의 월별 칸 개수가 맞게 계산됨
   })();
   /* WT_NAV: 새로고침/뒤로가기 진입 시 필터 상태(단위/범위/미반영) 복원 */
   if(_pfNavT==='reload'||_pfNavT==='back_forward'){
